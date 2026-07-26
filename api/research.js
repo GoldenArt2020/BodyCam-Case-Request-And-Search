@@ -1,0 +1,53 @@
+import { tavilySearch } from "./_lib/tavily.js";
+import { groqComplete, extractJson } from "./_lib/groq.js";
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const tavilyKey = process.env.TAVILY_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!tavilyKey) return res.status(500).json({ error: "TAVILY_API_KEY is not set on the server" });
+  if (!groqKey) return res.status(500).json({ error: "GROQ_API_KEY is not set on the server" });
+
+  const { mode, focus, caseItem } = req.body || {};
+
+  try {
+    if (mode === "scan") {
+      const query = `true crime case ${focus || "United States"} body camera footage not released local news`;
+      const searchContext = await tavilySearch({ apiKey: tavilyKey, query, maxResults: 6 });
+
+      const systemPrompt = `You research true crime cases in the United States for a content researcher. From the search results given, extract real, verifiable cases that fit a coverage gap: either zero YouTube true-crime coverage, or coverage by at most one or two channels. Only use cases actually present in the search results — do not invent cases. Prioritize cases where body-worn camera footage exists but has not been publicly released or widely covered on YouTube. Respond with ONLY valid JSON: {"cases": [{"name": string, "location": string, "date": string, "summary": string (2 sentences max), "coverage": "unreleased"|"low_coverage"|"new", "bodycam_worn": boolean, "case_status": string}]}. Return up to 6 cases. If the search results don't support any real cases, return {"cases": []}.`;
+
+      const userPrompt = `Search focus: ${focus || "any region, any case type"}\n\nSearch results:\n${searchContext}`;
+
+      const text = await groqComplete({ apiKey: groqKey, systemPrompt, userPrompt });
+      const parsed = extractJson(text);
+      const cases = (parsed && parsed.cases) || [];
+      return res.status(200).json({ cases });
+    }
+
+    if (mode === "draft") {
+      if (!caseItem) return res.status(400).json({ error: "Missing caseItem" });
+
+      const query = `${caseItem.name} ${caseItem.location} police department public records custodian body camera footage request`;
+      const searchContext = await tavilySearch({ apiKey: tavilyKey, query, maxResults: 6 });
+
+      const systemPrompt = `You are drafting a formal public records request for body-worn camera footage under the applicable US state open-records law. Use the search results to identify the correct law-enforcement agency, its records custodian, and the state's open-records statute (state FOIA, CPRA, PIA, Sunshine Law, or whichever applies). Draft a complete, professional request letter that: names the specific case, date, and requests body-worn camera footage from the arrest and on-scene investigation; cites the statute; states the requester is a member of the public; asks for a response within the statutory deadline; asks for a fee waiver or fee estimate if applicable. Respond with ONLY valid JSON: {"department": string, "custodian_title": string, "statute": string, "response_deadline": string, "letter": string}. The letter field should include placeholders [Your Name], [Your Address], [Your Email/Phone], and [Date]. If the search results don't clearly identify the agency, make your best reasonable inference based on the location given and note the uncertainty briefly at the top of the letter in brackets.`;
+
+      const userPrompt = `Case: ${caseItem.name}. Location: ${caseItem.location}. Date: ${caseItem.date}. Status: ${caseItem.case_status}.\n\nSearch results:\n${searchContext}`;
+
+      const text = await groqComplete({ apiKey: groqKey, systemPrompt, userPrompt });
+      const parsed = extractJson(text);
+      if (!parsed || !parsed.letter) {
+        return res.status(200).json({ error: "Could not draft a letter from the search results" });
+      }
+      return res.status(200).json(parsed);
+    }
+
+    return res.status(400).json({ error: "Missing or invalid 'mode' (expected 'scan' or 'draft')" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Request failed" });
+  }
+}
