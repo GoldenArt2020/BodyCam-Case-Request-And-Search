@@ -8,6 +8,17 @@ export async function tavilySearch({ apiKey, query, maxResults = 6 }) {
       search_depth: "advanced",
       max_results: maxResults,
       include_answer: false,
+      topic: "news",
+      exclude_domains: [
+        "instagram.com",
+        "facebook.com",
+        "tiktok.com",
+        "twitter.com",
+        "x.com",
+        "reddit.com",
+        "pinterest.com",
+        "youtube.com",
+      ],
     }),
   });
 
