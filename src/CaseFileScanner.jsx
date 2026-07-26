@@ -84,6 +84,13 @@ export default function CaseFileScanner() {
   const [autoScan, setAutoScan] = useState(null);
   const [loadingCases, setLoadingCases] = useState(true);
 
+  const [profile, setProfile] = useState(null);
+  const [profileForm, setProfileForm] = useState({
+    name: "", organization: "", address: "", city: "", state: "", zip: "", email: "", phone: "",
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -101,7 +108,37 @@ export default function CaseFileScanner() {
         }
       } catch (e) {}
     })();
+    (async () => {
+      try {
+        const res = await fetch("/api/profile");
+        if (res.ok) {
+          const data = await res.json();
+          if (data) {
+            setProfile(data);
+            setProfileForm(data);
+          }
+        }
+      } catch (e) {}
+    })();
   }, []);
+
+  async function saveProfile() {
+    setSavingProfile(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profileForm),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProfile(data);
+        setProfileSaved(true);
+        setTimeout(() => setProfileSaved(false), 1500);
+      }
+    } catch (e) {}
+    setSavingProfile(false);
+  }
 
   async function persist(nextCases, changedCase) {
     setCases(nextCases);
@@ -163,6 +200,9 @@ export default function CaseFileScanner() {
           statute: parsed.statute,
           deadline: parsed.response_deadline,
           letter: parsed.letter,
+          filingMethod: parsed.filing_method || "unknown",
+          portalUrl: parsed.portal_url || null,
+          submissionEmail: parsed.submission_email || null,
           status: "drafted",
         };
         const next = cases.map((c) => (c.id === caseItem.id ? updated : c));
@@ -224,10 +264,11 @@ export default function CaseFileScanner() {
           </p>
         </header>
 
-        <div style={{ display: "flex", gap: "0", marginBottom: "24px" }}>
+        <div style={{ display: "flex", gap: "0", marginBottom: "24px", flexWrap: "wrap" }}>
           {[
             { key: "scan", label: "Scan for cases", icon: FileSearch },
             { key: "files", label: `Case files (${cases.length})`, icon: FolderOpen },
+            { key: "profile", label: profile ? "Requester profile" : "Set up requester profile", icon: Stamp },
           ].map((t) => (
             <button
               key={t.key}
@@ -354,6 +395,64 @@ export default function CaseFileScanner() {
           </>
         )}
 
+        {tab === "profile" && (
+          <div style={{ background: CARD, border: `1px solid ${HAIRLINE}`, padding: "22px", display: "grid", gap: "12px" }}>
+            <div style={{ fontSize: "13px", color: "#544C3C", marginBottom: "4px" }}>
+              This information is used to fill in and send your public records requests. It's stored in your database and reused for every case.
+            </div>
+            {[
+              ["name", "Full name"],
+              ["organization", "Organization / channel name"],
+              ["address", "Street address"],
+              ["city", "City"],
+              ["state", "State"],
+              ["zip", "ZIP code"],
+              ["email", "Email"],
+              ["phone", "Phone"],
+            ].map(([key, label]) => (
+              <div key={key}>
+                <label style={{ fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: SAGE, letterSpacing: "0.08em" }}>
+                  {label.toUpperCase()}
+                </label>
+                <input
+                  value={profileForm[key] || ""}
+                  onChange={(e) => setProfileForm({ ...profileForm, [key]: e.target.value })}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    border: `1px solid ${HAIRLINE}`,
+                    background: PAPER,
+                    fontSize: "14px",
+                    color: INK,
+                    marginTop: "6px",
+                  }}
+                />
+              </div>
+            ))}
+            <button
+              onClick={saveProfile}
+              disabled={savingProfile}
+              style={{
+                background: NAVY,
+                color: PAPER,
+                border: "none",
+                padding: "10px 18px",
+                fontSize: "13px",
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                justifyContent: "center",
+                opacity: savingProfile ? 0.6 : 1,
+                marginTop: "6px",
+              }}
+            >
+              {savingProfile ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : profileSaved ? <Check size={14} /> : <Stamp size={14} />}
+              {savingProfile ? "Saving" : profileSaved ? "Saved" : "Save profile"}
+            </button>
+          </div>
+        )}
+
         {tab === "files" && (
           <div style={{ display: "grid", gap: "12px" }}>
             {cases.length === 0 && (
@@ -424,6 +523,23 @@ export default function CaseFileScanner() {
                             resize: "vertical",
                           }}
                         />
+
+                        {c.filingMethod === "portal" && c.portalUrl && (
+                          <div style={{ fontSize: "12px", color: NAVY, marginTop: "10px" }}>
+                            Filed via portal: <a href={c.portalUrl} target="_blank" rel="noreferrer" style={{ color: STAMP_RED }}>{c.portalUrl}</a>
+                          </div>
+                        )}
+                        {c.filingMethod === "email" && c.submissionEmail && (
+                          <div style={{ fontSize: "12px", color: NAVY, marginTop: "10px" }}>
+                            Filed via email: {c.submissionEmail}
+                          </div>
+                        )}
+                        {c.filingMethod === "unknown" && (
+                          <div style={{ fontSize: "12px", color: SAGE, marginTop: "10px" }}>
+                            Filing method not confirmed — verify with the department directly before sending.
+                          </div>
+                        )}
+
                         <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
                           <button
                             onClick={() => copyLetter(c)}
@@ -431,6 +547,26 @@ export default function CaseFileScanner() {
                           >
                             {copiedId === c.id ? <Check size={13} /> : <Copy size={13} />} {copiedId === c.id ? "Copied" : "Copy letter"}
                           </button>
+
+                          {c.filingMethod === "portal" && c.portalUrl && (
+                            <a
+                              href={c.portalUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ background: NAVY, color: PAPER, border: "none", padding: "8px 14px", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px", textDecoration: "none" }}
+                            >
+                              <Send size={13} /> Open portal to submit
+                            </a>
+                          )}
+                          {c.filingMethod === "email" && c.submissionEmail && (
+                            <a
+                              href={`mailto:${c.submissionEmail}?subject=${encodeURIComponent("Public Records Request: " + c.name)}&body=${encodeURIComponent(c.letter)}`}
+                              style={{ background: NAVY, color: PAPER, border: "none", padding: "8px 14px", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px", textDecoration: "none" }}
+                            >
+                              <Send size={13} /> Email this request
+                            </a>
+                          )}
+
                           {c.status !== "requested" && (
                             <button
                               onClick={() => markRequested(c)}
@@ -457,9 +593,9 @@ export default function CaseFileScanner() {
 
         <footer style={{ marginTop: "40px", fontSize: "11px", color: "#8A8065", borderTop: `1px solid ${HAIRLINE}`, paddingTop: "14px" }}>
           Letters are drafts based on AI research and should be reviewed against the named agency's current
-          request process before sending. Fill in your name and contact details before submitting.
-          Case files are saved to your database and available on any device. A new batch of candidate
-          cases is scanned automatically once a day.
+          request process before sending. Set up your requester profile once and it will be used automatically
+          for every future draft. Case files are saved to your database and available on any device. A new
+          batch of candidate cases is scanned automatically once a day.
         </footer>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { kv } from "./_lib/kv.js";
 import { tavilySearch } from "./_lib/tavily.js";
 import { groqComplete, extractJson } from "./_lib/groq.js";
 
@@ -37,10 +38,27 @@ Prioritize cases where body-worn camera footage exists but has not been publicly
     if (mode === "draft") {
       if (!caseItem) return res.status(400).json({ error: "Missing caseItem" });
 
-      const query = `${caseItem.name} ${caseItem.location} police department public records custodian body camera footage request`;
+      const profile = (await kv.get("profile:requester")) || null;
+
+      const query = `${caseItem.name} ${caseItem.location} police department public records custodian body camera footage request nextrequest OR "public records request" OR "records request" email`;
       const searchContext = await tavilySearch({ apiKey: tavilyKey, query, maxResults: 6 });
 
-      const systemPrompt = `You are drafting a formal public records request for body-worn camera footage under the applicable US state open-records law. Use the search results to identify the correct law-enforcement agency, its records custodian, and the state's open-records statute (state FOIA, CPRA, PIA, Sunshine Law, or whichever applies). Draft a complete, professional request letter that: names the specific case, date, and requests body-worn camera footage from the arrest and on-scene investigation; cites the statute; states the requester is a member of the public; asks for a response within the statutory deadline; asks for a fee waiver or fee estimate if applicable. Respond with ONLY valid JSON: {"department": string, "custodian_title": string, "statute": string, "response_deadline": string, "letter": string}. The letter field should include placeholders [Your Name], [Your Address], [Your Email/Phone], and [Date]. If the search results don't clearly identify the agency, make your best reasonable inference based on the location given and note the uncertainty briefly at the top of the letter in brackets.`;
+      const requesterBlock = profile
+        ? `Requester information (use this exactly in the letter, no placeholders):\nName: ${profile.name}\nOrganization: ${profile.organization || ""}\nAddress: ${profile.address || ""}\nCity/State/ZIP: ${profile.city || ""}, ${profile.state || ""} ${profile.zip || ""}\nEmail: ${profile.email}\nPhone: ${profile.phone || ""}`
+        : `No requester information was provided. Use placeholders [Your Name], [Your Organization], [Your Address], [Your Email/Phone] in the letter.`;
+
+      const systemPrompt = `You are drafting a formal public records request for body-worn camera footage under the applicable US state open-records law. Use the search results to identify the correct law-enforcement agency, its records custodian, and the state's open-records statute (state FOIA, CPRA, PIA, Sunshine Law, or whichever applies).
+
+Also determine HOW to file the request, based on the search results:
+- If the agency uses a third-party records portal (for example a NextRequest instance, which looks like a subdomain such as "agencyname.nextrequest.com", or GovQA, JustFOIA, or a similar system), set "filing_method" to "portal" and "portal_url" to the exact URL of that agency's request-submission page. Set "submission_email" to null.
+- If the agency accepts requests by email with no dedicated portal, set "filing_method" to "email" and "submission_email" to the exact email address found in the search results. Set "portal_url" to null.
+- If you cannot determine either with reasonable confidence from the search results, set "filing_method" to "unknown" and both URL/email fields to null.
+
+Draft a complete, professional request letter that: names the specific case, date, and requests body-worn camera footage from the arrest and on-scene investigation; cites the statute; identifies the requester using the information given below; asks for a response within the statutory deadline; asks for a fee waiver or fee estimate if applicable.
+
+${requesterBlock}
+
+Respond with ONLY valid JSON: {"department": string, "custodian_title": string, "statute": string, "response_deadline": string, "filing_method": "portal"|"email"|"unknown", "portal_url": string|null, "submission_email": string|null, "letter": string}. If the search results don't clearly identify the agency, make your best reasonable inference based on the location given and note the uncertainty briefly at the top of the letter in brackets.`;
 
       const userPrompt = `Case: ${caseItem.name}. Location: ${caseItem.location}. Date: ${caseItem.date}. Status: ${caseItem.case_status}.\n\nSearch results:\n${searchContext}`;
 
@@ -51,7 +69,6 @@ Prioritize cases where body-worn camera footage exists but has not been publicly
       }
       return res.status(200).json(parsed);
     }
-
     return res.status(400).json({ error: "Missing or invalid 'mode' (expected 'scan' or 'draft')" });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Request failed" });
