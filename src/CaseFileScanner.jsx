@@ -370,7 +370,7 @@ export default function CaseFileScanner() {
                       </div>
                       <p style={{ fontSize: "13px", margin: "10px 0", lineHeight: 1.5, color: "#3A3428" }}>{c.summary}</p>
                       <div style={{ fontSize: "11px", color: SAGE, marginBottom: "10px" }}>
-                        Bodycam worn: {c.bodycam_worn ? "yes" : "unclear"} · {c.case_status}
+                        Footage: {c.footage_type || "unspecified"} · {c.case_status}
                       </div>
                       <button
                         onClick={() => addCandidate(c)}
