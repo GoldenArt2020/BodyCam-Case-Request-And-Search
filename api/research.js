@@ -2,6 +2,17 @@ import { kv } from "./_lib/kv.js";
 import { tavilySearch } from "./_lib/tavily.js";
 import { groqComplete, extractJson } from "./_lib/groq.js";
 
+const US_STATES = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut",
+  "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
+  "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan",
+  "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+  "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+  "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+  "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
+  "Wisconsin", "Wyoming",
+];
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -16,12 +27,37 @@ export default async function handler(req, res) {
 
   try {
     if (mode === "scan") {
-      const query = `true crime case ${focus || "United States"} convicted OR sentenced OR "guilty plea" 911 call OR body camera OR interrogation footage released police department not widely covered`;
-      const searchContext = await tavilySearch({ apiKey: tavilyKey, query, maxResults: 6 });
+      // If the user gave a specific focus, search just that. Otherwise, sample several
+      // states at random and search all of them in parallel so a single scan actually
+      // spans multiple states/local PDs instead of just one.
+      const STATES_PER_SCAN = 5;
+      let searchTargets;
+      if (focus) {
+        searchTargets = [focus];
+      } else {
+        const shuffled = [...US_STATES].sort(() => Math.random() - 0.5);
+        searchTargets = shuffled.slice(0, STATES_PER_SCAN);
+      }
+
+      const searchResults = await Promise.all(
+        searchTargets.map(async (target) => {
+          const query = `true crime case ${target} local police department convicted OR sentenced OR "guilty plea" 911 call OR body camera OR interrogation footage released not widely covered`;
+          const context = await tavilySearch({ apiKey: tavilyKey, query, maxResults: 4 });
+          return { target, context };
+        })
+      );
+
+      const searchContext = searchResults
+        .map((r) => `--- Search results for ${r.target} ---\n${r.context}`)
+        .join("\n\n");
+
+      const searchFocus = focus || searchTargets.join(", ");
 
       const systemPrompt = `You research true crime cases in the United States for a content researcher building narrated documentary-style videos. From the search results given, extract real, verifiable cases that fit a coverage gap: either zero YouTube true-crime coverage, or coverage by at most one or two channels. Only use cases actually present in the search results — do not invent cases.
 
 A case only qualifies if the search results give you ALL of the following: a named victim or suspect (or, if unidentified, a specific incident description with named location), a specific date (month/year minimum), and a specific law-enforcement agency or jurisdiction. If the search results are too thin to support these details — for example, a vague social post, a one-line mention, or a summary that would require guessing — DO NOT include that case. It is better to return fewer cases, or an empty list, than to include a weak or speculative one. Never write a summary that says details are unavailable; if you would have to write that, drop the case instead.
+
+Search across all US states and territories, and do not limit results to large or well-known police departments — actively favor cases handled by small-town, county, or rural local police departments, since these tend to have the least existing YouTube coverage. The search results below are grouped by state under "--- Search results for [state] ---" headers; pull qualifying cases from any or all of these states, not just the first one. Return a mix across different states where the results support it, rather than clustering all picks in a single state.
 
 Prioritize cases that have real recorded law-enforcement footage tied to them: 911 calls, body-worn camera, dash camera, or interrogation/interview room video. This footage does not need to be bodycam specifically — 911 audio and interrogation-room footage both qualify, since all three are the raw material used to build a narrated documentary episode. Body-worn cameras were not in meaningful use by US police departments before approximately 2014, so if a case predates 2014 and its only footage type is bodycam, do not include it. 911 calls, interrogation footage, and dash cam are not bound by that 2014 floor.
 
@@ -32,9 +68,9 @@ ONLY include cases that are fully closed and resolved. The search results must s
 Examples of case_status values that QUALIFY (closed): "convicted of first-degree murder, sentenced to life without parole", "pled guilty to manslaughter, sentenced to 12 years", "acquitted at trial", "charges dismissed by prosecution, case closed".
 Examples of case_status values that DO NOT QUALIFY (still open, exclude these): "arrested and charged, awaiting trial", "trial scheduled for 2026", "under investigation, no arrest yet", "convicted, sentencing hearing pending", "case under appeal".
 
-Respond with ONLY valid JSON: {"cases": [{"name": string, "location": string, "date": string, "summary": string (2 sentences max, concrete facts only), "coverage": "unreleased"|"low_coverage"|"new", "footage_type": string (e.g. "911 call", "bodycam", "interrogation room", "dash cam", or a combination), "case_status": string (must describe the final resolved outcome, e.g. "convicted, sentenced to life" or "pled guilty, sentenced to 15 years")}]}. Return up to 6 cases. If the search results don't support any qualifying cases, return {"cases": []}.`;
+Respond with ONLY valid JSON: {"cases": [{"name": string, "location": string, "date": string, "summary": string (2 sentences max, concrete facts only), "coverage": "unreleased"|"low_coverage"|"new", "footage_type": string (e.g. "911 call", "bodycam", "interrogation room", "dash cam", or a combination), "case_status": string (must describe the final resolved outcome, e.g. "convicted, sentenced to life" or "pled guilty, sentenced to 15 years")}]}. Return up to 8 cases, prioritizing a spread across the different states searched. If the search results don't support any qualifying cases, return {"cases": []}.`;
 
-      const userPrompt = `Search focus: ${focus || "any region, any case type"}\n\nSearch results:\n${searchContext}`;
+      const userPrompt = `Search focus: ${searchFocus}\n\nSearch results:\n${searchContext}`;
 
       const text = await groqComplete({ apiKey: groqKey, systemPrompt, userPrompt });
       const parsed = extractJson(text);
@@ -52,7 +88,7 @@ Respond with ONLY valid JSON: {"cases": [{"name": string, "location": string, "d
         return true;
       });
 
-      return res.status(200).json({ cases });
+      return res.status(200).json({ cases, focus: searchFocus });
     }
 
     if (mode === "draft") {
