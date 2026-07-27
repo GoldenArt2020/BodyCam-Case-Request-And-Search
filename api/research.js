@@ -29,13 +29,29 @@ Favor cases with a strong narrative arc suited to a documentary retelling: a cle
 
 ONLY include cases that are fully closed and resolved. The search results must show one of: a conviction and sentencing already handed down, a finalized guilty plea with sentencing complete, or an acquittal/dismissal that concluded the case. If the search results show the case is still under investigation, a suspect has been arrested but not yet tried, a trial is upcoming or in progress, an appeal is pending, or the outcome is otherwise unresolved, DO NOT include that case — drop it even if every other detail is strong. When in doubt about whether a case is fully closed, leave it out.
 
+Examples of case_status values that QUALIFY (closed): "convicted of first-degree murder, sentenced to life without parole", "pled guilty to manslaughter, sentenced to 12 years", "acquitted at trial", "charges dismissed by prosecution, case closed".
+Examples of case_status values that DO NOT QUALIFY (still open, exclude these): "arrested and charged, awaiting trial", "trial scheduled for 2026", "under investigation, no arrest yet", "convicted, sentencing hearing pending", "case under appeal".
+
 Respond with ONLY valid JSON: {"cases": [{"name": string, "location": string, "date": string, "summary": string (2 sentences max, concrete facts only), "coverage": "unreleased"|"low_coverage"|"new", "footage_type": string (e.g. "911 call", "bodycam", "interrogation room", "dash cam", or a combination), "case_status": string (must describe the final resolved outcome, e.g. "convicted, sentenced to life" or "pled guilty, sentenced to 15 years")}]}. Return up to 6 cases. If the search results don't support any qualifying cases, return {"cases": []}.`;
 
       const userPrompt = `Search focus: ${focus || "any region, any case type"}\n\nSearch results:\n${searchContext}`;
 
       const text = await groqComplete({ apiKey: groqKey, systemPrompt, userPrompt });
       const parsed = extractJson(text);
-      const cases = (parsed && parsed.cases) || [];
+      const rawCases = (parsed && parsed.cases) || [];
+
+      // Backstop filter: the model doesn't always obey the "closed cases only" instruction,
+      // so re-check case_status/summary text here and drop anything that still reads as open.
+      const CLOSED_PATTERN = /(convicted|found guilty|pled guilty|pleaded guilty|guilty plea|sentenced|acquitted|found not guilty|charges? dismissed|case closed|life in prison|years in prison|life without parole)/i;
+      const OPEN_PATTERN = /(awaiting trial|pending trial|set for trial|trial (is )?scheduled|trial begins|trial (is )?upcoming|trial (is )?underway|under investigation|not yet charged|no arrest|awaiting sentencing|sentencing (is )?pending|under appeal|appeal (is )?pending|mistrial|no verdict|ongoing investigation|still at large|remains? at large)/i;
+
+      const cases = rawCases.filter((c) => {
+        const text = `${c.case_status || ""} ${c.summary || ""}`;
+        if (OPEN_PATTERN.test(text)) return false;
+        if (!CLOSED_PATTERN.test(text)) return false;
+        return true;
+      });
+
       return res.status(200).json({ cases });
     }
 
