@@ -41,7 +41,7 @@ export default async function handler(req, res) {
 
       const searchResults = await Promise.all(
         searchTargets.map(async (target) => {
-          const query = `true crime case ${target} local police department convicted OR sentenced OR "guilty plea" 911 call OR body camera OR interrogation footage released not widely covered`;
+          const query = `murder homicide case ${target} local police department convicted OR sentenced OR "guilty plea" 911 call OR body camera OR interrogation footage released not widely covered`;
           const context = await tavilySearch({ apiKey: tavilyKey, query, maxResults: 4 });
           return { target, context };
         })
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
 
       const searchFocus = focus || searchTargets.join(", ");
 
-      const systemPrompt = `You research true crime cases in the United States for a content researcher building narrated documentary-style videos. From the search results given, extract real, verifiable cases that fit a coverage gap: either zero YouTube true-crime coverage, or coverage by at most one or two channels. Only use cases actually present in the search results — do not invent cases.
+      const systemPrompt = `You research murder and homicide cases in the United States for a content researcher building narrated documentary-style videos. Only include cases where a victim was killed — murder, homicide, or manslaughter. Do NOT include cases that are only assault, robbery, home invasion, kidnapping, burglary, sexual assault, or fraud unless someone was killed as part of that same case. From the search results given, extract real, verifiable murder/homicide cases that fit a coverage gap: either zero YouTube true-crime coverage, or coverage by at most one or two channels. Only use cases actually present in the search results — do not invent cases.
 
 A case only qualifies if the search results give you ALL of the following: a named victim or suspect (or, if unidentified, a specific incident description with named location), a specific date (month/year minimum), and a specific law-enforcement agency or jurisdiction. If the search results are too thin to support these details — for example, a vague social post, a one-line mention, or a summary that would require guessing — DO NOT include that case. It is better to return fewer cases, or an empty list, than to include a weak or speculative one. Never write a summary that says details are unavailable; if you would have to write that, drop the case instead.
 
