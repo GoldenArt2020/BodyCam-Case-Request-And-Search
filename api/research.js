@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
   try {
     if (mode === "scan") {
-      const query = `true crime case ${focus || "United States"} 911 call OR body camera OR interrogation footage released police department not widely covered`;
+      const query = `true crime case ${focus || "United States"} convicted OR sentenced OR "guilty plea" 911 call OR body camera OR interrogation footage released police department not widely covered`;
       const searchContext = await tavilySearch({ apiKey: tavilyKey, query, maxResults: 6 });
 
       const systemPrompt = `You research true crime cases in the United States for a content researcher building narrated documentary-style videos. From the search results given, extract real, verifiable cases that fit a coverage gap: either zero YouTube true-crime coverage, or coverage by at most one or two channels. Only use cases actually present in the search results — do not invent cases.
@@ -25,9 +25,11 @@ A case only qualifies if the search results give you ALL of the following: a nam
 
 Prioritize cases that have real recorded law-enforcement footage tied to them: 911 calls, body-worn camera, dash camera, or interrogation/interview room video. This footage does not need to be bodycam specifically — 911 audio and interrogation-room footage both qualify, since all three are the raw material used to build a narrated documentary episode. Body-worn cameras were not in meaningful use by US police departments before approximately 2014, so if a case predates 2014 and its only footage type is bodycam, do not include it. 911 calls, interrogation footage, and dash cam are not bound by that 2014 floor.
 
-Favor cases with a strong narrative arc suited to a documentary retelling: a clear hook (a secret revealed, a betrayal, a forensic or digital breakthrough, a wiretap or jailhouse confession), and ideally some resolution already on record (an arrest, a plea, a trial outcome, or a sentencing) rather than a case that is still a complete blank. Do not include cases whose central subject matter is child sexual abuse material or child sexual exploitation, even if footage exists — exclude these entirely regardless of coverage gap.
+Favor cases with a strong narrative arc suited to a documentary retelling: a clear hook (a secret revealed, a betrayal, a forensic or digital breakthrough, a wiretap or jailhouse confession). Do not include cases whose central subject matter is child sexual abuse material or child sexual exploitation, even if footage exists — exclude these entirely regardless of coverage gap.
 
-Respond with ONLY valid JSON: {"cases": [{"name": string, "location": string, "date": string, "summary": string (2 sentences max, concrete facts only), "coverage": "unreleased"|"low_coverage"|"new", "footage_type": string (e.g. "911 call", "bodycam", "interrogation room", "dash cam", or a combination), "case_status": string}]}. Return up to 6 cases. If the search results don't support any qualifying cases, return {"cases": []}.`;
+ONLY include cases that are fully closed and resolved. The search results must show one of: a conviction and sentencing already handed down, a finalized guilty plea with sentencing complete, or an acquittal/dismissal that concluded the case. If the search results show the case is still under investigation, a suspect has been arrested but not yet tried, a trial is upcoming or in progress, an appeal is pending, or the outcome is otherwise unresolved, DO NOT include that case — drop it even if every other detail is strong. When in doubt about whether a case is fully closed, leave it out.
+
+Respond with ONLY valid JSON: {"cases": [{"name": string, "location": string, "date": string, "summary": string (2 sentences max, concrete facts only), "coverage": "unreleased"|"low_coverage"|"new", "footage_type": string (e.g. "911 call", "bodycam", "interrogation room", "dash cam", or a combination), "case_status": string (must describe the final resolved outcome, e.g. "convicted, sentenced to life" or "pled guilty, sentenced to 15 years")}]}. Return up to 6 cases. If the search results don't support any qualifying cases, return {"cases": []}.`;
 
       const userPrompt = `Search focus: ${focus || "any region, any case type"}\n\nSearch results:\n${searchContext}`;
 
